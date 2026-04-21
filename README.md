@@ -1,135 +1,229 @@
-Reference-based RNA-Seq Data Analysis
-A hands-on tutorial from the Galaxy Training Network covering the complete computational workflow for detecting differentially expressed (DE) genes and pathways from RNA-Seq data. The tutorial is based on a real experiment profiling Drosophila melanogaster cells after depletion of the Pasilla regulatory gene.
-Source: Galaxy Training Network - Reference-based RNA-Seq
-Estimated time: 8 hours
-Level: Introductory
-License: Creative Commons Attribution 4.0 International
+# Reference-based RNA-Seq Data Analysis
 
-Background
-RNA sequencing (RNA-Seq) is a widely used technology for analyzing the cellular transcriptome. One of its most common applications is profiling gene expression by identifying differentially expressed genes or molecular pathways across biological conditions.
-This tutorial reproduces an analysis from Brooks et al. (2011), where the authors identified genes and pathways regulated by the Pasilla gene (the Drosophila homologue of mammalian splicing regulators Nova-1 and Nova-2) using RNA-Seq data. The Pasilla gene was depleted via RNA interference (RNAi), and total RNA was isolated from both treated and untreated samples.
-Seven samples are used across the tutorial:
+A complete Galaxy-based workflow for identifying differentially expressed genes and biological pathways from RNA-Seq data, demonstrated on *Drosophila melanogaster*.
 
-4 untreated samples: GSM461176, GSM461177, GSM461178, GSM461182
-3 treated (Pasilla-depleted) samples: GSM461179, GSM461180, GSM461181
+**Source:** [Galaxy Training Network Tutorial](https://training.galaxyproject.org/training-material/topics/transcriptomics/tutorials/ref-based/tutorial.html)
+**Level:** Introductory | **Time:** ~8 hours | **License:** CC BY 4.0
 
-Two samples (one per condition) are used for the initial FASTQ processing steps; all seven are used for the differential expression analysis.
+---
 
-Learning Objectives
-After completing this tutorial, you will be able to:
+## The Experiment
 
-Evaluate RNA-Seq data quality using Falco and MultiQC reports
-Explain the principle of splice-aware mapping of RNA-Seq reads to a eukaryotic reference genome
-Select and run a state-of-the-art RNA-Seq mapping tool (STAR)
-Assess the quality of mapping results
-Determine library strandness from mapping outputs
-Count the number of reads per annotated gene using featureCounts or STAR
-Understand count normalization prior to sample comparison
-Run a differential gene expression analysis with DESeq2
-Interpret DESeq2 output to identify, annotate, and visualize DE genes
-Perform Gene Ontology (GO) and KEGG pathway enrichment analyses
+This tutorial reproduces the analysis from **Brooks et al. (2011)**, which investigated genes regulated by the *Pasilla* splicing factor in *Drosophila* cells. The *Pasilla* gene was knocked down via RNAi and RNA-Seq libraries were prepared from treated and untreated cells.
 
+**7 samples total:**
 
-Prerequisites
+| Sample | Condition | Library Type |
+|---|---|---|
+| GSM461176, GSM461177, GSM461178, GSM461182 | Untreated | Mixed SE/PE |
+| GSM461179, GSM461180, GSM461181 | PS-depleted | Mixed SE/PE |
 
-Introduction to Galaxy Analyses
-Quality Control (slides and hands-on)
-Mapping (slides and hands-on)
+> The first 2 samples (GSM461177 + GSM461180) are used for FASTQ processing steps. All 7 are used for differential expression analysis.
 
+---
 
-Data
-All input datasets are available on Zenodo at https://zenodo.org/record/6457007.
-For the FASTQ processing steps, the following paired-end files are used:
+## Workflow
+
+```
+FASTQ files
+    |
+    v
+Quality Control  (Falco, MultiQC, Cutadapt)
+    |
+    v
+Splice-aware Mapping  (STAR + dm6 genome)
+    |
+    v
+Read Counting per Gene  (featureCounts or STAR)
+    |
+    v
+Differential Expression  (DESeq2)
+    |
+    v
+Functional Enrichment  (GO + KEGG)
+```
+
+---
+
+## Step-by-Step
+
+### 1. Data Upload
+
+Import paired-end FASTQ files from Zenodo into a Galaxy history and build a paired collection.
+
+```
+# Full files (~1.5 GB each)
 https://zenodo.org/record/6457007/files/GSM461177_1.fastqsanger
 https://zenodo.org/record/6457007/files/GSM461177_2.fastqsanger
 https://zenodo.org/record/6457007/files/GSM461180_1.fastqsanger
 https://zenodo.org/record/6457007/files/GSM461180_2.fastqsanger
-Subsampled files (~5 MB each) are also available for a quicker run-through:
+
+# Subsampled files (~5 MB, for quick testing)
 https://zenodo.org/record/6457007/files/GSM461177_1_subsampled.fastqsanger
 https://zenodo.org/record/6457007/files/GSM461177_2_subsampled.fastqsanger
-https://zenodo.org/record/6457007/files/GSM461180_1_subsampled.fastqsanger
-https://zenodo.org/record/6457007/files/GSM461180_2_subsampled.fastqsanger
-The gene annotation file (GTF):
+```
+
+Verify datatype is `fastqsanger` (not `fastq`).
+
+---
+
+### 2. Quality Control
+
+**Tools:** Falco, MultiQC, Cutadapt
+
+- Run **Falco** on the flattened collection to generate per-sample reports
+- Aggregate with **MultiQC** for a side-by-side view
+- Trim with **Cutadapt**: quality cutoff = 20, minimum length = 20
+
+**What to look for:**
+- Read length: 37 bp for both samples
+- Quality drop at read ends, especially in reverse reads of GSM461180
+- High duplication rates are expected in RNA-Seq data
+
+**Expected Cutadapt output:**
+
+| Sample | Reads removed (too short) |
+|---|---|
+| GSM461177_untreat_paired | ~1.4% |
+| GSM461180_treat_paired | ~9% |
+
+---
+
+### 3. Mapping
+
+**Tool:** RNA STAR v2.7.11b | **Reference genome:** dm6 (*Drosophila melanogaster*)
+
+Since eukaryotic reads originate from processed mRNAs, a **splice-aware aligner** is required. STAR handles reads that span exon-exon junctions.
+
+**Key parameters:**
+- Genome: `Fly (Drosophila melanogaster): dm6 Full`
+- Annotation: `Drosophila_melanogaster.BDGP6.32.109_UCSC.gtf.gz`
+- Junction length: `36` (read length - 1)
+- Enable per-gene read counts: `Yes`
+- Compute coverage: `Yes in bedgraph format`
+
+```
 https://zenodo.org/record/6457007/files/Drosophila_melanogaster.BDGP6.32.109_UCSC.gtf.gz
+```
 
-Workflow Overview
-1. Data Upload
-Import FASTQ files into a Galaxy history and create a paired-end dataset collection. Verify that the datatype is set to fastqsanger.
-2. Quality Control
-Sequence quality is assessed and trimmed using three tools:
+**Expected mapping rates (from MultiQC):**
 
-Falco - generates per-sample quality reports (a drop-in replacement for FastQC)
-MultiQC - aggregates reports for easy comparison across samples
-Cutadapt - trims low-quality bases and removes reads shorter than 20 bp
+| Sample | Uniquely mapped |
+|---|---|
+| GSM461177_untreat_paired | >83% |
+| GSM461180_treat_paired | >79% |
 
-Key parameters for Cutadapt: quality cutoff of 20, minimum read length of 20. The tool is run on the paired-end collection to ensure consistent trimming of both mates.
-3. Mapping
-Reads originating from eukaryotic mRNAs must be mapped using a splice-aware aligner, since the majority of reads span intron-exon boundaries. This tutorial uses STAR (Spliced Transcripts Alignment to a Reference).
-Mapping is performed against the Drosophila melanogaster dm6 reference genome, with the Ensembl GTF annotation provided for splice junction guidance. The junction length parameter should be set to (read length - 1), which is 36 for this dataset.
-Mapping quality is summarized using MultiQC. Both samples are expected to have over 80% of reads uniquely mapped. The BAM outputs can be inspected visually in IGV or JBrowse2.
-Optional quality checks on BAM files include:
+> Rates below 70% should be investigated for contamination.
 
-MarkDuplicates (Picard) - checks duplicate read levels (up to 50% is considered normal)
-Samtools idxstats - examines read distribution across chromosomes
-Gene Body Coverage (RSeQC) - checks for 5' or 3' coverage bias
-Read Distribution (RSeQC) - confirms that the majority of reads (>80%) map to exonic regions
+**Optional QC on BAM files:**
 
-4. Counting Reads per Annotated Gene
-To compare gene expression across conditions, reads are counted per gene using exon-level overlaps.
-Estimating Library Strandness
-Library strandness must be determined before counting, as it affects how overlapping genes on opposite strands are handled. There are five methods available:
+| Check | Tool | What to expect |
+|---|---|---|
+| Duplicate rate | MarkDuplicates (Picard) | <50% is normal |
+| Chromosome distribution | Samtools idxstats | Most reads on chr2, chr3, chrX |
+| Gene body coverage | RSeQC Gene Body Coverage | Even 5' to 3' coverage |
+| Read distribution | RSeQC Read Distribution | >80% reads on exons |
 
-Visual inspection of read strands in IGV (color reads by first-of-pair strand)
-Visual inspection in JBrowse2 with pileup strand coloring
-Coverage comparison across strands from STAR using pyGenomeTracks
-Inspection of STAR gene count output columns across stranded/unstranded scenarios
-Infer Experiment (RSeQC) - compares read orientation against reference gene model
+---
 
-For this dataset, both samples produce near-equal fractions of forward and reverse reads, confirming an unstranded library.
-Library TypeInfer ExperimentHISAT2HTSeq-countfeatureCountsPE - UnstrandedundecideddefaultnoUnstranded (0)PE - Stranded Forward1++,1--,2+-,2-+Second Strand F/FRyesForward (1)PE - Stranded Reverse1+-,1-+,2++,2--First Strand R/RFreverseReverse (2)
-Counting with featureCounts
-featureCounts is run with the following key settings:
+### 4. Counting Reads per Gene
 
-Strand information: Unstranded
-Feature type: exon
-Gene identifier: gene_id
-Paired-end reads counted as single fragments
-Minimum mapping quality: 10
+#### Estimating Library Strandness
 
-Approximately 63% of reads are expected to be assigned to genes, which is a satisfactory rate. The output is a two-column count table (gene ID and count) compatible with DESeq2, edgeR, and limma-voom.
-Alternatively, STAR's built-in gene count output can be used. The STAR output contains four columns (gene ID, unstranded counts, stranded-forward counts, stranded-reverse counts) and requires reformatting to extract the relevant column (column 2 for this unstranded dataset).
-5. Differential Gene Expression Analysis
-All seven samples are used from this step onwards. The analysis is performed with DESeq2, which:
+Before counting, determine whether the library is stranded. This affects how reads overlapping genes on opposite strands are handled.
 
-Normalizes counts across samples
-Models count data using a negative binomial distribution
-Tests for differential expression between treated and untreated conditions
+**5 methods available:**
 
-Results are annotated to add gene names and descriptions, and filtered to extract significantly DE genes (adjusted p-value threshold typically < 0.05). Visualization includes heatmaps and volcano plots.
-6. Functional Enrichment Analysis
-Two enrichment analyses are performed on the set of DE genes:
+1. **IGV** - color reads by first-of-pair strand; equal red/blue = unstranded
+2. **JBrowse2** - same visual check, integrated in Galaxy
+3. **pyGenomeTracks** - compare STAR strand 1 vs strand 2 coverage
+4. **STAR gene counts** - the stranding with the highest gene assignment rate matches the library
+5. **Infer Experiment (RSeQC)** - compares read orientation to gene models
 
-Gene Ontology (GO) analysis - identifies over-represented biological processes, molecular functions, and cellular components
-KEGG pathway analysis - identifies affected metabolic and signaling pathways
+**Result for this dataset:** Both samples are **unstranded**
 
+```
+GSM461177_untreat_paired:
+  Fraction explained by "1++,1--,2+-,2-+": 0.4626
+  Fraction explained by "1+-,1-+,2++,2--": 0.4360
+```
 
-Tools Used
-ToolVersionPurposeFalco1.2.4+galaxy0Per-sample quality reportsMultiQC1.27+galaxy4Aggregated quality reportingCutadapt5.2+galaxy0Read trimming and filteringRNA STAR2.7.11b+galaxy0Splice-aware read mappingfeatureCounts2.1.1+galaxy0Read counting per geneMarkDuplicates3.1.1.0Duplicate read assessmentSamtools idxstats2.0.7Chromosome-level read distributionGene Body Coverage5.0.3+galaxy0Coverage uniformity across gene bodiesRead Distribution5.0.3+galaxy0Read distribution across genomic featuresInfer Experiment5.0.3+galaxy0Library strandness estimationDESeq2-Differential expression analysisJBrowse23.6.5+galaxy1Genome browser for BAM inspectionpyGenomeTracks3.9+galaxy0Coverage visualization
+**Strandness settings across tools:**
 
-Compatible Galaxy Servers
+| Library Type | Infer Experiment | HTSeq-count | featureCounts |
+|---|---|---|---|
+| Unstranded | undecided | no | 0 |
+| Stranded Forward | 1++,1--,2+-,2-+ | yes | 1 |
+| Stranded Reverse | 1+-,1-+,2++,2-- | reverse | 2 |
 
-UseGalaxy.eu (recommended)
-UseGalaxy.fr (recommended)
-UseGalaxy.org / Main (recommended)
-UseGalaxy.org.au (possibly working)
+#### Counting with featureCounts
 
+**Tool:** featureCounts v2.1.1
 
-Input Histories and Answer Histories
-Pre-loaded input and answer histories are available on UseGalaxy.eu for reference. See the tutorial page for direct links.
+Key settings:
+- Strand: `Unstranded`
+- Feature type: `exon`
+- Gene identifier: `gene_id`
+- Paired-end reads counted as 1 fragment
+- Minimum mapping quality: `10`
 
-Citation
-Brooks AN, Yang L, Duff MO, et al. Conservation of an RNA regulatory map between Drosophila and mammals. Genome Research, 2011. doi:10.1101/gr.108662.110
-Tutorial authors include Berenice Batut, Mallory Freeberg, Mo Heydarian, Anika Erxleben, Pavankumar Videm, Clemens Blank, Maria Doyle, Nicola Soranzo, Peter van Heusden, and Lucille Delisle.
+**Expected assignment rate:** ~63% — check with MultiQC featureCounts summary.
 
-License
-Tutorial content is licensed under Creative Commons Attribution 4.0 International. The GTN framework is licensed under MIT.
+> If assignment rate falls below 50%, inspect the BAM in IGV and verify the GTF matches your reference genome version.
+
+---
+
+### 5. Differential Expression Analysis
+
+**Tool:** DESeq2
+
+All 7 samples are used from this step. DESeq2 models count data using a negative binomial distribution and tests for expression differences between treated (PS-depleted) and untreated conditions.
+
+Pipeline:
+1. Run DESeq2 on the count matrix
+2. Annotate results with gene names and descriptions
+3. Filter by adjusted p-value (typically < 0.05)
+4. Visualize with heatmaps and volcano plots
+
+---
+
+### 6. Functional Enrichment Analysis
+
+Two analyses are run on the set of differentially expressed genes:
+
+**Gene Ontology (GO):** Over-represented biological processes, molecular functions, and cellular components
+
+**KEGG Pathways:** Affected metabolic and signaling pathways
+
+---
+
+## Tools Summary
+
+| Tool | Version | Step |
+|---|---|---|
+| Falco | 1.2.4+galaxy0 | Quality control |
+| MultiQC | 1.27+galaxy4 | Report aggregation |
+| Cutadapt | 5.2+galaxy0 | Trimming |
+| RNA STAR | 2.7.11b+galaxy0 | Mapping |
+| featureCounts | 2.1.1+galaxy0 | Read counting |
+| Infer Experiment (RSeQC) | 5.0.3+galaxy0 | Strandness |
+| MarkDuplicates (Picard) | 3.1.1.0 | QC |
+| DESeq2 | - | Differential expression |
+| JBrowse2 | 3.6.5+galaxy1 | BAM visualization |
+
+---
+
+## Compatible Galaxy Servers
+
+- [UseGalaxy.eu](https://usegalaxy.eu) (recommended)
+- [UseGalaxy.org](https://usegalaxy.org) (recommended)
+- [UseGalaxy.fr](https://usegalaxy.fr/) (recommended)
+- [UseGalaxy.org.au](https://usegalaxy.org.au) (possibly working)
+
+---
+
+## Citation
+
+Brooks et al. (2011). Conservation of an RNA regulatory map between Drosophila and mammals. *Genome Research*. [doi:10.1101/gr.108662.110](https://doi.org/10.1101/gr.108662.110)
+
+Tutorial by Berenice Batut, Mallory Freeberg, Mo Heydarian et al. — [Galaxy Training Network](https://training.galaxyproject.org)
